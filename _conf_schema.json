@@ -45,14 +45,35 @@
     "default": true
   },
   "punish_single_keywords": {
-    "description": "单图惩罚关键词池（只含失败者）。kimage：发射/射、摸头、杀；也可填 meme_generator 关键词如 摸头/咬 等。总池=单图+双图",
+    "description": "单图惩罚关键词池（只含失败者）。kimage/meme_generator 均可。总池=单图+双图",
     "type": "list",
-    "default": ["发射", "摸头", "杀"]
+    "default": [
+      "发射",
+      "灰飞烟灭",
+      "红温",
+      "闪瞎",
+      "哈哈镜",
+      "敲",
+      "上香",
+      "out",
+      "控制",
+      "撕衣服",
+      "诈尸",
+      "卖掉了",
+      "拿捏",
+      "这是鸡",
+      "捶爆",
+      "汤姆嘲笑",
+      "上坟",
+      "震惊",
+      "恍惚",
+      "风车转"
+    ]
   },
   "punish_dual_keywords": {
-    "description": "双图惩罚关键词池（胜利者+失败者）。kimage：撅、抽；也可填 meme_generator 如 揍/击剑。无胜利者时跳过双图",
+    "description": "双图惩罚关键词池（胜利者+失败者）。无胜利者时跳过双图",
     "type": "list",
-    "default": ["撅", "抽"]
+    "default": ["撅", "抽", "揍"]
   },
   "meme_retry": {
     "description": "表情包倒退次数上限：0=整池都试；N=最多试N个关键词。失败换下一个，全失败只发文字",
@@ -60,7 +81,7 @@
     "default": 0
   },
   "settle_delay_sec": {
-    "description": "表情包发出后，延迟多少秒再发结算文字（等图上传）",
+    "description": "结算文案发出后，延迟多少秒再发 meme 图（图已预先生成）",
     "type": "float",
     "default": 1.5
   },

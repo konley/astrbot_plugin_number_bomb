@@ -38,8 +38,29 @@ _KIMAGE_MEME_ROUTES: dict[str, tuple[str, str, bool]] = {
     "摸头": ("petpet.py", "generate_petpet", False),
     "杀": ("behead.py", "generate_behead", False),
 }
-_DEFAULT_SINGLE_KW = ["发射", "摸头", "杀"]
-_DEFAULT_DUAL_KW = ["撅", "抽"]
+_DEFAULT_SINGLE_KW = [
+    "发射",
+    "灰飞烟灭",
+    "红温",
+    "闪瞎",
+    "哈哈镜",
+    "敲",
+    "上香",
+    "out",
+    "控制",
+    "撕衣服",
+    "诈尸",
+    "卖掉了",
+    "拿捏",
+    "这是鸡",
+    "捶爆",
+    "汤姆嘲笑",
+    "上坟",
+    "震惊",
+    "恍惚",
+    "风车转",
+]
+_DEFAULT_DUAL_KW = ["撅", "抽", "揍"]
 
 
 def _resolve_kimage_meme_dir() -> Path:
@@ -95,7 +116,7 @@ class Game:
     "astrbot_plugin_number_bomb",
     "konley",
     "群聊数字炸弹：轮流猜数缩区间，超时催促后强制引爆，管理员拆弹",
-    "0.2.4",
+    "0.2.5",
     "https://github.com/konley/astrbot_plugin_number_bomb",
 )
 class NumberBomb(Star):
@@ -1118,7 +1139,7 @@ class NumberBomb(Star):
         umo: str,
         chains: list[list],
     ):
-        """先发图、再等 settle_delay 发结算文案，保证图先到、字不抢戏。"""
+        """结算文案在前；若有后续（meme 图）则等 settle_delay 再发。"""
         if not chains:
             return
         first, *rest = chains
@@ -1183,7 +1204,7 @@ class NumberBomb(Star):
         # 真实爆炸：未踩雷者各 +1 积分（静默）
         self._award_winners(g, victim)
 
-        # 先生成 meme，再：图 → 延迟 → 合并结算文案（1 条）
+        # 先等 meme 生成完（用户暂不可见），再：结算文案 → 延迟 → meme 图
         gif_path, action = await self._make_punish_gif(
             winner,
             victim,
@@ -1224,11 +1245,11 @@ class NumberBomb(Star):
             winner or "-",
         )
 
-        chains: list[list] = []
+        # 文案在前，meme 在后（图已生成完毕）
+        chains: list[list] = [settle_chain]
         if gif_path:
             chains.append([Image(file=str(gif_path))])
             self._schedule_tmp_cleanup(gif_path)
-        chains.append(settle_chain)
 
         async for r in self._emit_settle(event, umo, chains):
             yield r

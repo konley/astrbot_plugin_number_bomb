@@ -26,7 +26,7 @@
 7. 爆炸结果与惩罚提示**分两条**发送
 8. **积分**：真实爆炸时，未踩雷的参与者各 +1（持久化）
 9. **魔法护盾**：积分 ≥ `shield_cost`（默认 5）时踩雷自动扣分抵消炸弹并提示剩余积分；不够则不提积分
-10. **结算 meme**：真实爆炸时从配置关键词池随机抽取（单图+双图）；失败自动倒退换下一个；全失败只发文字。先发图，再延迟 `settle_delay_sec` 发文字
+10. **结算 meme**：`hit`/`no_safe`/`timeout` 均从总池（单图∪双图）抽取；失败倒退；全失败只发文字。**等图生成完**后先发结算文案，再延迟 `settle_delay_sec` 发 meme
 11. `group_blacklist` 内的群号完全不响应
 
 ## 配置
@@ -37,8 +37,8 @@
 
 | 配置 | 含义 | 默认 |
 |------|------|------|
-| `punish_single_keywords` | 单图（仅失败者） | 发射、摸头、杀 |
-| `punish_dual_keywords` | 双图（胜利者+失败者） | 撅、抽 |
+| `punish_single_keywords` | 单图（仅失败者） | 发射、灰飞烟灭、红温…等 20 个 |
+| `punish_dual_keywords` | 双图（胜利者+失败者） | 撅、抽、揍 |
 | `meme_retry` | 倒退上限，`0`=整池都试 | 0 |
 | `enable_punish_meme` | 总开关 | true |
 | `enable_meme_generator` | 启用 meme_generator 解析未知词 | true |
