@@ -116,7 +116,7 @@ class Game:
     "astrbot_plugin_number_bomb",
     "konley",
     "群聊数字炸弹：轮流猜数缩区间，超时催促后强制引爆，管理员拆弹",
-    "0.2.6",
+    "0.2.7",
     "https://github.com/konley/astrbot_plugin_number_bomb",
 )
 class NumberBomb(Star):
@@ -1145,8 +1145,6 @@ class NumberBomb(Star):
     ):
         bomb = g.bomb
         vname = g.names.get(victim, victim)
-        prev = self._prev_uid(g, victim)
-        pname = g.names.get(prev or "", prev or "")
         umo = g.umo
         winner = self._pick_winner(g, victim)
 
@@ -1156,7 +1154,8 @@ class NumberBomb(Star):
             boom_chain = self._chain([
                 self._at(victim, vname),
                 Plain(
-                    f" 用{self.shield_cost}积分护盾抵消炸弹（剩{left_pts}）喵"
+                    f" 用{self.shield_cost}积分兑换护盾抵消炸弹喵\n"
+                    f"剩余积分{left_pts}（每一次胜场积分+1）"
                 ),
             ])
             await self._clear_game(gid, silent=True)
@@ -1178,38 +1177,41 @@ class NumberBomb(Star):
 
         # 真实爆炸：未踩雷者各 +1 积分（静默）
         self._award_winners(g, victim)
+        wname = g.names.get(winner or "", winner or "")
 
-        # 先等 meme 生成完，再一条消息：文案 + 图（无分条延迟）
+        # 先等 meme 生成完，再：爆炸文案+图 一条，惩罚文案另发一条
         gif_path, action = await self._make_punish_gif(
             winner,
             victim,
-            wname=g.names.get(winner or "", winner or ""),
+            wname=wname,
             vname=vname,
         )
 
-        if reason == "timeout":
-            head = f"超时炸！炸弹{bomb} "
-        elif reason == "no_safe":
-            head = f"无安全数！炸弹{bomb} "
-        else:
-            head = f"BOOM！炸弹{bomb} "
-
-        settle_parts: list = [
-            Plain(head),
+        boom_parts: list = [
             self._at(victim, vname),
-            Plain(" 请真心话/大冒险"),
+            Plain(" 想逃？BOOM——\n"),
+            self._at(victim, vname),
+            Plain(" 被炸上了天喵"),
         ]
-        if prev and prev != victim:
-            settle_parts.extend([
-                Plain("，"),
-                self._at(prev, pname),
-                Plain(" 出题"),
-            ])
-        settle_parts.append(Plain(" 喵"))
         if gif_path:
-            settle_parts.append(Image(file=str(gif_path)))
+            boom_parts.append(Image(file=str(gif_path)))
             self._schedule_tmp_cleanup(gif_path)
-        settle_chain = self._chain(settle_parts)
+        boom_chain = self._chain(boom_parts)
+
+        punish_parts: list = [
+            Plain("请输家 "),
+            self._at(victim, vname),
+            Plain(" 选择真心话/大冒险"),
+        ]
+        if winner and winner != victim:
+            punish_parts.extend([
+                Plain("\n请赢家 "),
+                self._at(winner, wname),
+                Plain(" 出题喵~"),
+            ])
+        else:
+            punish_parts.append(Plain(" 喵~"))
+        punish_chain = self._chain(punish_parts)
 
         await self._clear_game(gid, silent=True)
         logger.info(
@@ -1224,10 +1226,12 @@ class NumberBomb(Star):
         )
 
         if event is not None:
-            yield event.chain_result(settle_chain)
+            yield event.chain_result(boom_chain)
+            yield event.chain_result(punish_chain)
             self._stop(event)
         else:
-            await self._send_umo_chain(umo, settle_chain)
+            await self._send_umo_chain(umo, boom_chain)
+            await self._send_umo_chain(umo, punish_chain)
 
     @staticmethod
     def _shrink(g: Game, guess: int) -> None:
