@@ -116,7 +116,7 @@ class Game:
     "astrbot_plugin_number_bomb",
     "konley",
     "群聊数字炸弹：轮流猜数缩区间，超时催促后强制引爆，管理员拆弹",
-    "0.2.5",
+    "0.2.6",
     "https://github.com/konley/astrbot_plugin_number_bomb",
 )
 class NumberBomb(Star):
@@ -137,8 +137,9 @@ class NumberBomb(Star):
         self.shield_cost = max(1, int(cfg.get("shield_cost", 5) or 5))
         self.enable_punish_meme = bool(cfg.get("enable_punish_meme", True))
         self.enable_meme_generator = bool(cfg.get("enable_meme_generator", True))
+        # 兼容旧配置；合并发送时不再使用
         self.settle_delay_sec = max(
-            0.0, float(cfg.get("settle_delay_sec", 1.5) or 1.5)
+            0.0, float(cfg.get("settle_delay_sec", 0) or 0)
         )
         self.punish_single_keywords = _parse_kw_list(
             cfg.get("punish_single_keywords"), _DEFAULT_SINGLE_KW
@@ -1133,32 +1134,6 @@ class NumberBomb(Star):
 
         asyncio.create_task(_job())
 
-    async def _emit_settle(
-        self,
-        event: AstrMessageEvent | None,
-        umo: str,
-        chains: list[list],
-    ):
-        """结算文案在前；若有后续（meme 图）则等 settle_delay 再发。"""
-        if not chains:
-            return
-        first, *rest = chains
-        if event is not None:
-            yield event.chain_result(first)
-            if rest:
-                if self.settle_delay_sec > 0:
-                    await asyncio.sleep(self.settle_delay_sec)
-                for c in rest:
-                    yield event.chain_result(c)
-            self._stop(event)
-        else:
-            await self._send_umo_chain(umo, first)
-            if rest:
-                if self.settle_delay_sec > 0:
-                    await asyncio.sleep(self.settle_delay_sec)
-                for c in rest:
-                    await self._send_umo_chain(umo, c)
-
     async def _boom(
         self,
         event: AstrMessageEvent | None,
@@ -1204,7 +1179,7 @@ class NumberBomb(Star):
         # 真实爆炸：未踩雷者各 +1 积分（静默）
         self._award_winners(g, victim)
 
-        # 先等 meme 生成完（用户暂不可见），再：结算文案 → 延迟 → meme 图
+        # 先等 meme 生成完，再一条消息：文案 + 图（无分条延迟）
         gif_path, action = await self._make_punish_gif(
             winner,
             victim,
@@ -1231,6 +1206,9 @@ class NumberBomb(Star):
                 Plain(" 出题"),
             ])
         settle_parts.append(Plain(" 喵"))
+        if gif_path:
+            settle_parts.append(Image(file=str(gif_path)))
+            self._schedule_tmp_cleanup(gif_path)
         settle_chain = self._chain(settle_parts)
 
         await self._clear_game(gid, silent=True)
@@ -1245,14 +1223,11 @@ class NumberBomb(Star):
             winner or "-",
         )
 
-        # 文案在前，meme 在后（图已生成完毕）
-        chains: list[list] = [settle_chain]
-        if gif_path:
-            chains.append([Image(file=str(gif_path))])
-            self._schedule_tmp_cleanup(gif_path)
-
-        async for r in self._emit_settle(event, umo, chains):
-            yield r
+        if event is not None:
+            yield event.chain_result(settle_chain)
+            self._stop(event)
+        else:
+            await self._send_umo_chain(umo, settle_chain)
 
     @staticmethod
     def _shrink(g: Game, guess: int) -> None:

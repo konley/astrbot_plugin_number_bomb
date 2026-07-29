@@ -81,9 +81,9 @@
     "default": 0
   },
   "settle_delay_sec": {
-    "description": "结算文案发出后，延迟多少秒再发 meme 图（图已预先生成）",
+    "description": "已废弃：结算改为文案+图同一条发送，此项不再使用",
     "type": "float",
-    "default": 1.5
+    "default": 0
   },
   "stop_event": {
     "description": "命中后拦截不再进LLM",
