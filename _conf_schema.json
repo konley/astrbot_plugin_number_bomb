@@ -1,0 +1,67 @@
+{
+  "group_blacklist": {
+    "description": "禁用本插件的群号列表",
+    "type": "list",
+    "default": []
+  },
+  "default_max": {
+    "description": "默认上限N（范围0～N）",
+    "type": "int",
+    "default": 100
+  },
+  "turn_timeout_sec": {
+    "description": "单人回合超时秒数（倒计时，面板可改）",
+    "type": "int",
+    "default": 60
+  },
+  "max_nudge": {
+    "description": "超时催促次数，达到后强制引爆（面板可改）",
+    "type": "int",
+    "default": 2
+  },
+  "join_wait_timeout_sec": {
+    "description": "等待第二人加入的超时秒数",
+    "type": "int",
+    "default": 600
+  },
+  "allow_mid_join": {
+    "description": "进行中是否允许新人中途加入（只排队不插队猜数）",
+    "type": "bool",
+    "default": true
+  },
+  "shield_cost": {
+    "description": "魔法护盾兑换所需积分（踩雷时自动扣除并抵消炸弹）",
+    "type": "int",
+    "default": 5
+  },
+  "enable_punish_meme": {
+    "description": "爆炸结算时是否自动生成惩罚表情包（kimage 关键词池）",
+    "type": "bool",
+    "default": true
+  },
+  "punish_single_keywords": {
+    "description": "单图惩罚关键词池（只含失败者头像）。内置可识别：发射/射、摸头、杀。总池=单图+双图随机抽",
+    "type": "list",
+    "default": ["发射", "摸头", "杀"]
+  },
+  "punish_dual_keywords": {
+    "description": "双图惩罚关键词池（胜利者+失败者）。内置可识别：撅、抽。无胜利者时自动跳过双图",
+    "type": "list",
+    "default": ["撅", "抽"]
+  },
+  "meme_retry": {
+    "description": "表情包倒退次数上限：0=整池都试；N=最多试N个关键词。失败换下一个，全失败只发文字",
+    "type": "int",
+    "default": 0
+  },
+  "settle_delay_sec": {
+    "description": "表情包发出后，延迟多少秒再发结算文字（等图上传）",
+    "type": "float",
+    "default": 1.5
+  },
+  "stop_event": {
+    "description": "命中后拦截不再进LLM",
+    "type": "bool",
+    "default": true
+  }
+}
