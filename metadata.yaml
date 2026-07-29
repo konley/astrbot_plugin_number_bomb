@@ -1,6 +1,6 @@
 name: astrbot_plugin_number_bomb
 desc: 群聊数字炸弹：轮流猜数缩区间，超时催促后强制引爆，积分护盾抵消，管理员拆弹
-version: 0.2.3
+version: 0.2.4
 author: konley
 repo: https://github.com/konley/astrbot_plugin_number_bomb
 display_name: 数字炸弹

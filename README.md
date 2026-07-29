@@ -33,7 +33,7 @@
 
 见 `_conf_schema.json`（WebUI 插件配置）。
 
-惩罚表情包关键词池（同源 kimage，可面板改）：
+惩罚表情包关键词池（可面板改）：
 
 | 配置 | 含义 | 默认 |
 |------|------|------|
@@ -41,7 +41,9 @@
 | `punish_dual_keywords` | 双图（胜利者+失败者） | 撅、抽 |
 | `meme_retry` | 倒退上限，`0`=整池都试 | 0 |
 | `enable_punish_meme` | 总开关 | true |
+| `enable_meme_generator` | 启用 meme_generator 解析未知词 | true |
 
-内置可识别关键词：`发射`/`射`、`摸头`、`杀`、`撅`、`抽`。写了未知词会跳过并打日志，不崩溃。
+解析顺序：**kimage 内置**（`发射`/`射`、`摸头`、`杀`、`撅`、`抽`）→ **meme_generator** 关键词/key。  
+`min_images>=2` 当双图，否则单图；失败自动倒退；全失败只发文字。
 
 积分文件：`data/plugin_data/astrbot_plugin_number_bomb/scores.json`

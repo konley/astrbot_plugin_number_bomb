@@ -35,17 +35,22 @@
     "default": 5
   },
   "enable_punish_meme": {
-    "description": "爆炸结算时是否自动生成惩罚表情包（kimage 关键词池）",
+    "description": "爆炸结算时是否自动生成惩罚表情包",
+    "type": "bool",
+    "default": true
+  },
+  "enable_meme_generator": {
+    "description": "是否启用 meme_generator 库解析未知关键词（kimage 内置词优先）",
     "type": "bool",
     "default": true
   },
   "punish_single_keywords": {
-    "description": "单图惩罚关键词池（只含失败者头像）。内置可识别：发射/射、摸头、杀。总池=单图+双图随机抽",
+    "description": "单图惩罚关键词池（只含失败者）。kimage：发射/射、摸头、杀；也可填 meme_generator 关键词如 摸头/咬 等。总池=单图+双图",
     "type": "list",
     "default": ["发射", "摸头", "杀"]
   },
   "punish_dual_keywords": {
-    "description": "双图惩罚关键词池（胜利者+失败者）。内置可识别：撅、抽。无胜利者时自动跳过双图",
+    "description": "双图惩罚关键词池（胜利者+失败者）。kimage：撅、抽；也可填 meme_generator 如 揍/击剑。无胜利者时跳过双图",
     "type": "list",
     "default": ["撅", "抽"]
   },

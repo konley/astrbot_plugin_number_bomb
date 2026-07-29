@@ -95,7 +95,7 @@ class Game:
     "astrbot_plugin_number_bomb",
     "konley",
     "群聊数字炸弹：轮流猜数缩区间，超时催促后强制引爆，管理员拆弹",
-    "0.2.3",
+    "0.2.4",
     "https://github.com/konley/astrbot_plugin_number_bomb",
 )
 class NumberBomb(Star):
@@ -115,6 +115,7 @@ class NumberBomb(Star):
         self.do_stop_event = bool(cfg.get("stop_event", True))
         self.shield_cost = max(1, int(cfg.get("shield_cost", 5) or 5))
         self.enable_punish_meme = bool(cfg.get("enable_punish_meme", True))
+        self.enable_meme_generator = bool(cfg.get("enable_meme_generator", True))
         self.settle_delay_sec = max(
             0.0, float(cfg.get("settle_delay_sec", 1.5) or 1.5)
         )
@@ -134,9 +135,12 @@ class NumberBomb(Star):
             data_root / "plugin_data" / "astrbot_plugin_number_bomb" / "scores.json"
         )
         self._tmp_dir = data_root / "plugin_data" / "astrbot_plugin_number_bomb" / "tmp"
-        # key = "do.py:generate_do" → callable
+        # kimage: "do.py:generate_do" → callable
         self._meme_fns: dict[str, object] = {}
         self._meme_dir = _resolve_kimage_meme_dir()
+        # meme_generator: keyword → Meme 模板
+        self._mg_by_kw: dict[str, object] = {}
+        self._mg_ready = False
 
     async def initialize(self) -> None:
         self._load_scores()
@@ -144,19 +148,22 @@ class NumberBomb(Star):
         self._load_meme_gens()
         logger.info(
             "%s initialize default_max=%s turn_timeout=%s max_nudge=%s "
-            "shield_cost=%s punish_meme=%s settle_delay=%s "
-            "single=%s dual=%s meme_retry=%s gens=%s scores=%s blacklist=%s",
+            "shield_cost=%s punish_meme=%s mg=%s settle_delay=%s "
+            "single=%s dual=%s meme_retry=%s kimage_gens=%s mg_kws=%s "
+            "scores=%s blacklist=%s",
             LOG,
             self.default_max,
             self.turn_timeout_sec,
             self.max_nudge,
             self.shield_cost,
             self.enable_punish_meme,
+            self.enable_meme_generator and self._mg_ready,
             self.settle_delay_sec,
             self.punish_single_keywords,
             self.punish_dual_keywords,
             self.meme_retry,
             len(self._meme_fns),
+            len(self._mg_by_kw),
             len(self._scores),
             len(self.group_blacklist),
         )
@@ -569,7 +576,7 @@ class NumberBomb(Star):
         self._arm_turn_timer(gid)
 
     def _load_meme_gens(self) -> None:
-        """按路由表预加载 kimage 生成器（失败不崩，缺哪个跳过哪个）。"""
+        """预加载 kimage 生成器 + meme_generator 关键词索引（失败不崩）。"""
         self._meme_dir = _resolve_kimage_meme_dir()
         self._meme_fns = {}
         needed: set[tuple[str, str]] = set()
@@ -579,10 +586,35 @@ class NumberBomb(Star):
             fn = self._import_meme_func(self._meme_dir / mod_file, func_name)
             if fn is not None:
                 self._meme_fns[f"{mod_file}:{func_name}"] = fn
+
+        self._mg_by_kw = {}
+        self._mg_ready = False
+        if self.enable_meme_generator:
+            try:
+                from meme_generator import get_memes
+
+                memes = get_memes() or []
+                for m in memes:
+                    # key 优先；同名 keyword 后写不覆盖已有（保留更精确的 key）
+                    self._mg_by_kw.setdefault(str(m.key), m)
+                    for k in list(m.info.keywords or []):
+                        ks = str(k).strip()
+                        if ks:
+                            self._mg_by_kw.setdefault(ks, m)
+                self._mg_ready = bool(self._mg_by_kw)
+            except Exception:
+                logger.warning(
+                    "%s meme_generator unavailable, kimage-only", LOG, exc_info=True
+                )
+                self._mg_by_kw = {}
+                self._mg_ready = False
+
         logger.info(
-            "%s meme gens loaded=%s dir=%s",
+            "%s meme backends kimage=%s mg_ready=%s mg_kws=%s dir=%s",
             LOG,
             sorted(self._meme_fns.keys()),
+            self._mg_ready,
+            len(self._mg_by_kw),
             self._meme_dir,
         )
 
@@ -603,46 +635,112 @@ class NumberBomb(Star):
             logger.exception("%s import meme failed path=%s", LOG, path)
             return None
 
-    def _resolve_kw_route(self, keyword: str) -> tuple[str, str, bool] | None:
-        """关键词 → (mod_file, func_name, dual)。未知返回 None。"""
+    def _resolve_kimage_route(self, keyword: str) -> tuple[str, str, bool] | None:
+        """kimage 关键词 → (mod_file, func_name, dual)。"""
         kw = (keyword or "").strip()
         if not kw:
             return None
         if kw in _KIMAGE_MEME_ROUTES:
             return _KIMAGE_MEME_ROUTES[kw]
-        # 大小写/空白不敏感兜底
         low = kw.lower()
         for k, v in _KIMAGE_MEME_ROUTES.items():
             if k.lower() == low:
                 return v
         return None
 
-    def _build_punish_pool(self, has_winner: bool) -> list[tuple[str, str, str, bool]]:
+    def _resolve_mg_meme(self, keyword: str):
+        """meme_generator 关键词/key → Meme 或 None。"""
+        if not self._mg_ready:
+            return None
+        kw = (keyword or "").strip()
+        if not kw:
+            return None
+        m = self._mg_by_kw.get(kw)
+        if m is not None:
+            return m
+        low = kw.lower()
+        for k, v in self._mg_by_kw.items():
+            if str(k).lower() == low:
+                return v
+        return None
+
+    @staticmethod
+    def _mg_needs_dual(meme) -> bool:
+        """模板至少需要 2 张图 → 当双图用。"""
+        try:
+            return int(meme.info.params.min_images) >= 2
+        except Exception:
+            return False
+
+    def _build_punish_pool(self, has_winner: bool) -> list[dict]:
         """
-        总池 = 单图关键词 + 双图关键词（配置仅分类；实际 dual 以路由表为准）。
-        返回 [(display_kw, mod_file, func_name, dual), ...]，已过滤不可用项。
+        总池 = 单图关键词 + 双图关键词。
+        解析顺序：kimage 路由 → meme_generator 模板。
+        返回 [{keyword, backend, dual, ...}, ...]
         """
-        pool: list[tuple[str, str, str, bool]] = []
-        seen_fn: set[str] = set()
+        pool: list[dict] = []
+        seen: set[str] = set()
+
         for kw in self.punish_single_keywords + self.punish_dual_keywords:
-            route = self._resolve_kw_route(kw)
-            if route is None:
-                logger.warning("%s punish kw unknown/skip kw=%s", LOG, kw)
-                continue
-            mod_file, func_name, dual = route
-            if dual and not has_winner:
-                continue
-            key = f"{mod_file}:{func_name}"
-            if key not in self._meme_fns:
-                logger.warning(
-                    "%s punish kw gen missing kw=%s key=%s", LOG, kw, key
+            # 1) kimage
+            route = self._resolve_kimage_route(kw)
+            if route is not None:
+                mod_file, func_name, dual = route
+                if dual and not has_winner:
+                    continue
+                key = f"kimage:{mod_file}:{func_name}"
+                if key in seen:
+                    continue
+                if f"{mod_file}:{func_name}" not in self._meme_fns:
+                    logger.warning(
+                        "%s kimage gen missing kw=%s key=%s", LOG, kw, key
+                    )
+                    continue
+                seen.add(key)
+                pool.append(
+                    {
+                        "keyword": kw,
+                        "backend": "kimage",
+                        "dual": dual,
+                        "mod_file": mod_file,
+                        "func_name": func_name,
+                    }
                 )
                 continue
-            # 同一生成器只进池一次（射/发射 合并）
-            if key in seen_fn:
+
+            # 2) meme_generator
+            if not (self.enable_meme_generator and self._mg_ready):
+                logger.warning("%s punish kw unknown/skip kw=%s", LOG, kw)
                 continue
-            seen_fn.add(key)
-            pool.append((kw, mod_file, func_name, dual))
+            meme = self._resolve_mg_meme(kw)
+            if meme is None:
+                logger.warning("%s punish kw unknown/skip kw=%s", LOG, kw)
+                continue
+            try:
+                min_img = int(meme.info.params.min_images)
+            except Exception:
+                min_img = 1
+            if min_img <= 0:
+                # 纯文本模板，惩罚场景跳过
+                logger.warning("%s punish kw no-image template skip kw=%s", LOG, kw)
+                continue
+            dual = self._mg_needs_dual(meme)
+            if dual and not has_winner:
+                continue
+            mk = str(getattr(meme, "key", kw))
+            key = f"mg:{mk}"
+            if key in seen:
+                continue
+            seen.add(key)
+            pool.append(
+                {
+                    "keyword": kw,
+                    "backend": "mg",
+                    "dual": dual,
+                    "meme": meme,
+                    "meme_key": mk,
+                }
+            )
         return pool
 
     @staticmethod
@@ -662,6 +760,15 @@ class NumberBomb(Star):
             logger.exception("%s download avatar failed url=%s", LOG, url)
             return False
 
+    @staticmethod
+    def _read_bytes(path: str) -> bytes | None:
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+            return data or None
+        except Exception:
+            return None
+
     def _pick_winner(self, g: Game, victim: str) -> str | None:
         """优先上家；否则随机一名非受害者参与者。"""
         prev = self._prev_uid(g, victim)
@@ -672,7 +779,7 @@ class NumberBomb(Star):
             return None
         return random.choice(others)
 
-    async def _try_one_punish_gif(
+    async def _try_kimage_gif(
         self,
         *,
         keyword: str,
@@ -684,7 +791,6 @@ class NumberBomb(Star):
         victim_path: str,
         winner_path: str,
     ) -> str | None:
-        """尝试单个关键词生成；失败返回 None（不抛）。"""
         fn = self._meme_fns.get(f"{mod_file}:{func_name}")
         if fn is None:
             return None
@@ -699,7 +805,6 @@ class NumberBomb(Star):
                     return None
 
                 def _run_dual():
-                    # commander=胜利者, target=失败者
                     fn(winner_path, victim_path, out_path)
 
                 await loop.run_in_executor(None, _run_dual)
@@ -719,7 +824,7 @@ class NumberBomb(Star):
             return None
         except Exception:
             logger.warning(
-                "%s punish gif failed kw=%s gen=%s:%s",
+                "%s kimage gif failed kw=%s gen=%s:%s",
                 LOG,
                 keyword,
                 mod_file,
@@ -733,11 +838,164 @@ class NumberBomb(Star):
                 pass
             return None
 
+    async def _try_mg_gif(
+        self,
+        *,
+        keyword: str,
+        meme,
+        dual: bool,
+        winner: str | None,
+        victim: str,
+        victim_bytes: bytes,
+        winner_bytes: bytes | None,
+        wname: str,
+        vname: str,
+    ) -> str | None:
+        """调用 meme_generator 库生成；失败返回 None。"""
+        try:
+            from meme_generator import Image as MemeImage
+        except Exception:
+            logger.warning("%s meme_generator Image import failed", LOG, exc_info=True)
+            return None
+
+        loop = asyncio.get_event_loop()
+        uid = uuid.uuid4().hex[:8]
+        out_path = str(self._tmp_dir / f"nb_mg_{os.getpid()}_{uid}.gif")
+        try:
+            params = meme.info.params
+            min_img = int(params.min_images)
+            max_img = int(params.max_images)
+            min_txt = int(params.min_texts)
+            max_txt = int(params.max_texts)
+            default_texts = list(params.default_texts or [])
+
+            need = max(min_img, 1)
+            if max_img > 0:
+                need = min(need, max_img)
+            # 双图：胜利者在前、失败者在后（与 kimage 撅/抽一致）
+            images = []
+            if dual or need >= 2:
+                if not winner_bytes or not winner:
+                    return None
+                images.append(MemeImage(wname or str(winner), winner_bytes))
+                images.append(MemeImage(vname or str(victim), victim_bytes))
+            else:
+                images.append(MemeImage(vname or str(victim), victim_bytes))
+            # 需要更多图时用失败者头像填充
+            while len(images) < need:
+                images.append(MemeImage(vname or str(victim), victim_bytes))
+            if max_img > 0:
+                images = images[:max_img]
+
+            texts: list[str] = []
+            if min_txt > 0:
+                names = [wname or str(winner or ""), vname or str(victim)]
+                for t in default_texts:
+                    if len(texts) >= max_txt > 0:
+                        break
+                    if t:
+                        texts.append(str(t))
+                for n in names:
+                    if len(texts) >= min_txt:
+                        break
+                    if n and n not in texts:
+                        texts.append(n)
+                while len(texts) < min_txt:
+                    texts.append(vname or "喵")
+                if max_txt > 0:
+                    texts = texts[:max_txt]
+
+            options: dict = {}
+            if wname:
+                options.setdefault("name", wname)
+
+            def _run():
+                return meme.generate(images, texts, options)
+
+            result = await loop.run_in_executor(None, _run)
+            if result is None:
+                return None
+            if not isinstance(result, (bytes, bytearray)):
+                # 错误对象（ImageNumberMismatch 等）
+                logger.info(
+                    "%s mg generate non-bytes kw=%s type=%s result=%s",
+                    LOG,
+                    keyword,
+                    type(result).__name__,
+                    result,
+                )
+                return None
+            data = bytes(result)
+            if not data:
+                return None
+            with open(out_path, "wb") as f:
+                f.write(data)
+            return out_path
+        except Exception:
+            logger.warning(
+                "%s mg gif failed kw=%s key=%s",
+                LOG,
+                keyword,
+                getattr(meme, "key", "?"),
+                exc_info=True,
+            )
+            try:
+                if os.path.isfile(out_path):
+                    os.remove(out_path)
+            except OSError:
+                pass
+            return None
+
+    async def _try_one_punish_gif(
+        self,
+        cand: dict,
+        *,
+        winner: str | None,
+        victim: str,
+        victim_path: str,
+        winner_path: str,
+        victim_bytes: bytes,
+        winner_bytes: bytes | None,
+        wname: str,
+        vname: str,
+    ) -> str | None:
+        """尝试单个候选；失败返回 None（不抛）。"""
+        backend = cand.get("backend")
+        kw = cand.get("keyword", "")
+        dual = bool(cand.get("dual"))
+        if dual and (not winner or winner == victim):
+            return None
+        if backend == "kimage":
+            return await self._try_kimage_gif(
+                keyword=kw,
+                mod_file=cand["mod_file"],
+                func_name=cand["func_name"],
+                dual=dual,
+                winner=winner,
+                victim=victim,
+                victim_path=victim_path,
+                winner_path=winner_path,
+            )
+        if backend == "mg":
+            return await self._try_mg_gif(
+                keyword=kw,
+                meme=cand["meme"],
+                dual=dual,
+                winner=winner,
+                victim=victim,
+                victim_bytes=victim_bytes,
+                winner_bytes=winner_bytes,
+                wname=wname,
+                vname=vname,
+            )
+        return None
+
     async def _make_punish_gif(
-        self, winner: str | None, victim: str
+        self, winner: str | None, victim: str, *, wname: str = "", vname: str = ""
     ) -> tuple[str | None, str]:
         """
         从配置池随机抽关键词生成表情包；失败则倒退换下一个。
+        后端：kimage 优先匹配，其余走 meme_generator。
         返回 (gif路径, 展示用关键词)；全失败 (None, "")。
         """
         if not self.enable_punish_meme or not victim:
@@ -746,7 +1004,9 @@ class NumberBomb(Star):
         has_winner = bool(winner and winner != victim)
         pool = self._build_punish_pool(has_winner)
         if not pool:
-            logger.info("%s punish pool empty victim=%s has_winner=%s", LOG, victim, has_winner)
+            logger.info(
+                "%s punish pool empty victim=%s has_winner=%s", LOG, victim, has_winner
+            )
             return None, ""
 
         random.shuffle(pool)
@@ -758,6 +1018,8 @@ class NumberBomb(Star):
         tag = uuid.uuid4().hex[:8]
         victim_path = str(self._tmp_dir / f"nb_v_{os.getpid()}_{tag}.png")
         winner_path = ""
+        victim_bytes: bytes | None = None
+        winner_bytes: bytes | None = None
 
         try:
             ok_v = await loop.run_in_executor(
@@ -769,8 +1031,11 @@ class NumberBomb(Star):
             if not ok_v:
                 logger.warning("%s victim avatar download failed uid=%s", LOG, victim)
                 return None, ""
+            victim_bytes = self._read_bytes(victim_path)
+            if not victim_bytes:
+                return None, ""
 
-            need_dual = any(d for _k, _m, _f, d in candidates)
+            need_dual = any(bool(c.get("dual")) for c in candidates)
             if need_dual and has_winner:
                 winner_path = str(self._tmp_dir / f"nb_w_{os.getpid()}_{tag}.png")
                 ok_w = await loop.run_in_executor(
@@ -780,37 +1045,51 @@ class NumberBomb(Star):
                     winner_path,
                 )
                 if not ok_w:
-                    # 胜利者头像失败：丢掉双图候选，只试单图
                     logger.warning("%s winner avatar failed, drop dual pool", LOG)
-                    candidates = [c for c in candidates if not c[3]]
+                    candidates = [c for c in candidates if not c.get("dual")]
                     winner_path = ""
+                else:
+                    winner_bytes = self._read_bytes(winner_path)
 
-            for kw, mod_file, func_name, dual in candidates:
-                if dual and (not winner_path or not has_winner):
+            for cand in candidates:
+                dual = bool(cand.get("dual"))
+                kw = cand.get("keyword", "")
+                if dual and (not winner_path or not has_winner or not winner_bytes):
                     logger.info("%s skip dual kw=%s no winner avatar", LOG, kw)
                     continue
                 path = await self._try_one_punish_gif(
-                    keyword=kw,
-                    mod_file=mod_file,
-                    func_name=func_name,
-                    dual=dual,
+                    cand,
                     winner=winner,
                     victim=victim,
                     victim_path=victim_path,
                     winner_path=winner_path,
+                    victim_bytes=victim_bytes,
+                    winner_bytes=winner_bytes,
+                    wname=wname or str(winner or ""),
+                    vname=vname or str(victim),
                 )
                 if path:
                     logger.info(
-                        "%s punish gif ok kw=%s dual=%s path=%s",
+                        "%s punish gif ok kw=%s backend=%s dual=%s path=%s",
                         LOG,
                         kw,
+                        cand.get("backend"),
                         dual,
                         os.path.basename(path),
                     )
                     return path, kw
-                logger.info("%s punish gif fallback next after kw=%s", LOG, kw)
+                logger.info(
+                    "%s punish gif fallback next after kw=%s backend=%s",
+                    LOG,
+                    kw,
+                    cand.get("backend"),
+                )
 
-            logger.info("%s punish gif all failed tried=%s", LOG, [c[0] for c in candidates])
+            logger.info(
+                "%s punish gif all failed tried=%s",
+                LOG,
+                [(c.get("keyword"), c.get("backend")) for c in candidates],
+            )
             return None, ""
         finally:
             for p in (victim_path, winner_path):
@@ -905,7 +1184,12 @@ class NumberBomb(Star):
         self._award_winners(g, victim)
 
         # 先生成 meme，再：图 → 延迟 → 合并结算文案（1 条）
-        gif_path, action = await self._make_punish_gif(winner, victim)
+        gif_path, action = await self._make_punish_gif(
+            winner,
+            victim,
+            wname=g.names.get(winner or "", winner or ""),
+            vname=vname,
+        )
 
         if reason == "timeout":
             head = f"超时炸！炸弹{bomb} "
